@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { fileURLToPath } from 'url';
+import { existsSync } from 'fs';
 import path from 'path';
 import callsRouter from './routes/calls.js';
 
@@ -9,30 +10,35 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:5173' }));
+app.use(cors());
 app.use(express.json());
 
-app.use((req, res, next) => {
-  console.log(`[REQ] ${req.method} ${req.url} content-type: ${req.headers['content-type']}`);
-  next();
-});
-
-import { existsSync } from 'fs';
-
 app.get('/health', (_, res) => {
-  const publicPath = path.join(__dirname, 'public');
-  res.json({ ok: true, __dirname, publicPath, indexExists: existsSync(path.join(publicPath, 'index.html')) });
+  const p1 = path.join(__dirname, 'public');
+  const p2 = path.join(__dirname, '../frontend/dist');
+  res.json({
+    ok: true,
+    __dirname,
+    p1_exists: existsSync(path.join(p1, 'index.html')),
+    p2_exists: existsSync(path.join(p2, 'index.html')),
+  });
 });
+
 app.use('/api/calls', callsRouter);
 
-// Serve built frontend — dist copied into backend/public
-const frontendDist = path.join(__dirname, 'public');
+// Serve frontend — try both possible paths
+const frontendDist = existsSync(path.join(__dirname, 'public', 'index.html'))
+  ? path.join(__dirname, 'public')
+  : path.join(__dirname, '../frontend/dist');
+
 app.use(express.static(frontendDist));
 app.get('*', (req, res) => {
   const indexFile = path.join(frontendDist, 'index.html');
-  res.sendFile(indexFile, err => {
-    if (err) res.status(200).json({ status: 'CloseIQ API running' });
-  });
+  if (existsSync(indexFile)) {
+    res.sendFile(indexFile);
+  } else {
+    res.json({ status: 'CloseIQ API running', frontendDist, note: 'Frontend not found' });
+  }
 });
 
 app.listen(PORT, () => console.log(`CloseIQ backend running on http://localhost:${PORT}`));
