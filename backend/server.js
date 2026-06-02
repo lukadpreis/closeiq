@@ -20,11 +20,14 @@ app.use((req, res, next) => {
 app.get('/health', (_, res) => res.json({ ok: true }));
 app.use('/api/calls', callsRouter);
 
-// Serve built frontend for sharing
-const frontendDist = path.join(__dirname, '../frontend/dist');
+// Serve built frontend — dist copied into backend/public
+const frontendDist = path.join(__dirname, 'public');
 app.use(express.static(frontendDist));
 app.get('*', (req, res) => {
-  res.sendFile(path.join(frontendDist, 'index.html'));
+  const indexFile = path.join(frontendDist, 'index.html');
+  res.sendFile(indexFile, err => {
+    if (err) res.status(200).json({ status: 'CloseIQ API running' });
+  });
 });
 
 app.listen(PORT, () => console.log(`CloseIQ backend running on http://localhost:${PORT}`));
