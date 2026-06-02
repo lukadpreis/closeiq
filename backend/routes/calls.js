@@ -190,29 +190,46 @@ router.post('/:id/improve', async (req, res) => {
     }
 
     const client = new Anthropic({ apiKey: readKey() });
+    // Include a relevant excerpt of the transcript for context
+    const transcriptSample = (call.transcript || '')
+      .split('\n')
+      .filter(l => l.includes('[REP]') || l.includes('[KUNDE]') || l.includes('[CLIENT]'))
+      .slice(0, 60)
+      .join('\n');
+
     const message = await client.messages.create({
       model: 'claude-haiku-4-5',
-      max_tokens: 800,
+      max_tokens: 1200,
       messages: [{
         role: 'user',
-        content: `Du bist ein Sales Coach. Analysiere diese Call-Metriken und gib 3-4 konkrete, umsetzbare Verbesserungsvorschläge für den nächsten Call.
+        content: `Du bist ein erfahrener Sales Coach. Analysiere DIESEN SPEZIFISCHEN Call und gib 3-4 sehr konkrete Verbesserungsvorschläge.
 
-Metriken:
-- Talk Ratio Rep: ${a.talk?.rep||'?'}% (Ideal: 40-50%)
-- Prospect Talk: ${a.talk?.prospect||'?'}%
-- Max Monolog: ${a.monologue||'?'} Min (Ideal: <3 Min)
-- Filler Words: ${a.fillers||0} (Ideal: <10)
-- Fragen gestellt: ${a.questions||0} (Ideal: >9)
-- Prospect Fragen: ${a.prospectQ||0}
-- Geholte Ja's: ${a.jaCount||0}
-- Vertrauens-Score: ${a.trustScore||'?'}/100
-- Emotional Selling: ${a.emotionalSelling||'?'}%
-- Next Step: ${a.nextStep ? 'Ja' : 'Nein'}
-- Unbeantwortete Fragen: ${a.unansweredQuestions?.length||0}
+WICHTIG: Beziehe dich auf konkrete Momente aus dem Transkript — nenne was tatsächlich gesagt wurde, nicht allgemeine Regeln.
 
-Wichtige Info: ${call.prospect} ist ${a.keyData?.berufsstatus||'unbekannt'}.
+Call: ${call.prospect} (${a.keyData?.berufsstatus||'unbekannt'}) · ${call.duration} Min
+Sprache: ${transcriptSample.includes('[CLIENT]') ? 'Englisch' : 'Deutsch'}
 
-Antworte mit einem JSON Array von 3-4 Strings. Jeder String ist ein konkreter Verbesserungsvorschlag (1-2 Sätze, auf Deutsch). Nur JSON, kein Markdown.`
+Metriken aus diesem Call:
+- Rep Redeanteil: ${a.talk?.rep||'?'}% → Prospect nur ${a.talk?.prospect||'?'}%
+- Längster Monolog: ${a.monologue||'?'} Min
+- Filler Words: ${a.fillers||0}
+- Rep Fragen: ${a.questions||0}
+- Prospect Kaufsignal-Fragen: ${a.prospectQ||0}
+- Vertrauen: ${a.trustScore||'?'}/100
+- Unbeantwortete Kundenfragen: ${(a.unansweredQuestions||[]).join('; ') || 'keine'}
+- Wichtige Infos über Kunden: ${[a.keyData?.einkommen, a.keyData?.cashflow, a.keyData?.dreamPension].filter(Boolean).join(', ') || 'unbekannt'}
+- Einwände: ${(a.objections||[]).map(o=>o.label).join(', ') || 'keine'}
+- Pain Points: ${(a.painPoints||[]).join('; ')}
+
+Transkript-Ausschnitt:
+${transcriptSample}
+
+Gib ein JSON Array mit GENAU 3-4 Strings zurück. Jeder String:
+- Bezieht sich auf einen KONKRETEN Moment oder eine konkrete Aussage aus dem Transkript
+- Nennt was besser hätte gemacht werden können und WIE (konkretes Beispiel)
+- Ist spezifisch für DIESEN Call, DIESEN Kunden — keine generischen Verkaufsregeln
+- Max 2 Sätze pro Punkt
+Nur JSON, kein Markdown.`
       }],
     });
 

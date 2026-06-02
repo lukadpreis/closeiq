@@ -1,3 +1,5 @@
+// In production (served from backend), API is on same origin
+// In dev (Vite proxy), also /api works
 const BASE = '/api';
 
 export async function fetchCalls() {

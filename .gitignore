@@ -4,4 +4,4 @@ node_modules/
 *.mp3
 *.mov
 *.m4a
-dist/
+# dist/ — keep frontend build for deployment
