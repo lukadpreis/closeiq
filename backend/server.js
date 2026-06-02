@@ -17,7 +17,12 @@ app.use((req, res, next) => {
   next();
 });
 
-app.get('/health', (_, res) => res.json({ ok: true }));
+import { existsSync } from 'fs';
+
+app.get('/health', (_, res) => {
+  const publicPath = path.join(__dirname, 'public');
+  res.json({ ok: true, __dirname, publicPath, indexExists: existsSync(path.join(publicPath, 'index.html')) });
+});
 app.use('/api/calls', callsRouter);
 
 // Serve built frontend — dist copied into backend/public
