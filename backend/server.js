@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { fileURLToPath } from 'url';
-import { existsSync } from 'fs';
+import fs from 'fs';
 import path from 'path';
 import callsRouter from './routes/calls.js';
 
@@ -13,32 +13,32 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-app.get('/health', (_, res) => {
-  const p1 = path.join(__dirname, 'public');
-  const p2 = path.join(__dirname, '../frontend/dist');
-  res.json({
-    ok: true,
-    __dirname,
-    p1_exists: existsSync(path.join(p1, 'index.html')),
-    p2_exists: existsSync(path.join(p2, 'index.html')),
-  });
-});
-
+// API routes first
 app.use('/api/calls', callsRouter);
 
-// Serve frontend — try both possible paths
-const frontendDist = existsSync(path.join(__dirname, 'public', 'index.html'))
-  ? path.join(__dirname, 'public')
-  : path.join(__dirname, '../frontend/dist');
+app.get('/health', (_, res) => {
+  const publicDir = path.join(__dirname, 'public');
+  const files = fs.existsSync(publicDir) ? fs.readdirSync(publicDir) : [];
+  res.json({ ok: true, __dirname, publicDir, files });
+});
 
-app.use(express.static(frontendDist));
-app.get('*', (req, res) => {
-  const indexFile = path.join(frontendDist, 'index.html');
-  if (existsSync(indexFile)) {
-    res.sendFile(indexFile);
+// Frontend static files
+const publicDir = path.join(__dirname, 'public');
+const indexHtml = path.join(publicDir, 'index.html');
+
+if (fs.existsSync(publicDir)) {
+  app.use(express.static(publicDir));
+}
+
+// All other routes → serve index.html
+app.use((req, res) => {
+  if (fs.existsSync(indexHtml)) {
+    const content = fs.readFileSync(indexHtml, 'utf8');
+    res.setHeader('Content-Type', 'text/html');
+    res.status(200).send(content);
   } else {
-    res.json({ status: 'CloseIQ API running', frontendDist, note: 'Frontend not found' });
+    res.json({ status: 'API ok', indexHtml, exists: false });
   }
 });
 
-app.listen(PORT, () => console.log(`CloseIQ backend running on http://localhost:${PORT}`));
+app.listen(PORT, () => console.log(`CloseIQ backend on port ${PORT}`));
