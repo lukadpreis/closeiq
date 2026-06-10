@@ -3,66 +3,103 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import https from 'https';
+import http from 'http';
 import { extractAudio, transcribeAudio } from '../services/deepgram.js';
 import { analyzeCall } from '../services/claude.js';
 import { saveCall, getCalls, getCall, supabase } from '../services/supabase.js';
 
 const router = express.Router();
 
-const upload = multer({
-  dest: os.tmpdir(),
-  limits: { fileSize: 2 * 1024 * 1024 * 1024 }, // 2 GB
-  fileFilter: (req, file, cb) => {
-    const allowed = ['video/mp4', 'audio/mp4', 'audio/mpeg', 'audio/m4a', 'video/quicktime', 'audio/x-m4a', 'video/webm'];
-    if (allowed.includes(file.mimetype) || file.originalname.match(/\.(mp4|mp3|m4a|mov|webm)$/i)) {
-      cb(null, true);
-    } else {
-      cb(new Error('Nur MP4, MP3, M4A und MOV Dateien werden unterstützt.'));
-    }
-  },
+// ─── Helper: stream a URL to a local temp file ────────────────────────────────
+function downloadToFile(url, destPath) {
+  return new Promise((resolve, reject) => {
+    const proto = url.startsWith('https') ? https : http;
+    const file = fs.createWriteStream(destPath);
+    proto.get(url, (res) => {
+      if (res.statusCode !== 200) {
+        file.close();
+        fs.unlink(destPath, () => {});
+        return reject(new Error(`Storage download failed: HTTP ${res.statusCode}`));
+      }
+      res.pipe(file);
+      file.on('finish', () => { file.close(); resolve(); });
+      file.on('error', (err) => { fs.unlink(destPath, () => {}); reject(err); });
+    }).on('error', (err) => { fs.unlink(destPath, () => {}); reject(err); });
+  });
+}
+
+// ─── POST /api/calls/upload-url — generate a signed upload URL ───────────────
+// Frontend calls this first, then uploads the file DIRECTLY to Supabase Storage.
+// This bypasses the Express server for the large file transfer entirely.
+router.post('/upload-url', express.json(), async (req, res) => {
+  try {
+    const { filename } = req.body;
+    if (!filename) return res.status(400).json({ error: 'filename required' });
+
+    const safeName = filename.replace(/[^a-z0-9.\-_]/gi, '_');
+    const storagePath = `calls/${Date.now()}-${safeName}`;
+
+    const { data, error } = await supabase.storage
+      .from('call-recordings')
+      .createSignedUploadUrl(storagePath);
+
+    if (error) throw new Error(`Signed URL error: ${error.message}`);
+
+    res.json({ uploadUrl: data.signedUrl, storagePath });
+  } catch (err) {
+    console.error('[upload-url]', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// POST /api/calls/analyze — upload + transcribe + analyze in one shot
-router.post('/analyze', (req, res, next) => {
-  upload.single('file')(req, res, (err) => {
-    console.log(`[multer] err: ${err?.message || 'none'} | file: ${req.file?.originalname || 'MISSING'} | size: ${req.file?.size}`);
-    if (err) return res.status(400).json({ error: `Multer: ${err.message}` });
-    next();
+// ─── POST /api/calls/analyze — download from storage, transcribe, analyze ────
+router.post('/analyze', express.json({ limit: '1mb' }), async (req, res) => {
+  const { storagePath, prospect, company, outcome = 'follow-up' } = req.body;
+  if (!storagePath) return res.status(400).json({ error: 'storagePath required' });
+
+  // Start SSE immediately so the client knows we're working
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
   });
-}, async (req, res) => {
-  const tmpPath = req.file?.path;
+  const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+
+  const tmpPath = path.join(os.tmpdir(), `ciq-video-${Date.now()}.tmp`);
+  let audioPath = null;
+
   try {
-    const { prospect, company, outcome = 'follow-up' } = req.body;
-    if (!req.file) return res.status(400).json({ error: 'Keine Datei hochgeladen.' });
-    console.log(`[upload] ${req.file.originalname} ${(req.file.size/1024/1024).toFixed(1)}MB → ${req.file.path}`);
+    // 1. Download video from Supabase Storage to tmp
+    send('progress', { step: 1, label: 'Datei wird vorbereitet…' });
+    console.log(`[analyze] downloading ${storagePath} from storage…`);
 
-    // 1. Transcribe via Deepgram
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-    });
+    const { data: signed, error: urlErr } = await supabase.storage
+      .from('call-recordings')
+      .createSignedUrl(storagePath, 300); // 5-min URL for internal download
+    if (urlErr) throw new Error(`Storage signed URL: ${urlErr.message}`);
 
-    const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    await downloadToFile(signed.signedUrl, tmpPath);
+    console.log(`[analyze] downloaded to ${tmpPath} (${(fs.statSync(tmpPath).size/1024/1024).toFixed(1)}MB)`);
 
-    send('progress', { step: 1, label: 'Audio transkribieren…' });
+    // 2. Extract & transcribe audio
+    send('progress', { step: 2, label: 'Audio transkribieren…' });
     console.log('[step1] extracting audio with ffmpeg…');
-    const audioPath = await extractAudio(tmpPath);
+    audioPath = await extractAudio(tmpPath);
     const audioSize = (fs.statSync(audioPath).size / 1024 / 1024).toFixed(1);
     console.log(`[step1] audio extracted: ${audioSize}MB → sending to Deepgram`);
     const { transcript, segments, duration, words } = await transcribeAudio(audioPath);
     console.log('[step1] transcription done, duration:', duration);
-    fs.unlink(audioPath, () => {});
 
-    send('progress', { step: 2, label: 'Muster erkennen…' });
-    send('progress', { step: 3, label: 'Einwände klassifizieren…' });
+    send('progress', { step: 3, label: 'Muster erkennen…' });
+    send('progress', { step: 4, label: 'Einwände klassifizieren…' });
 
-    // 2. Analyze via Claude
+    // 3. Analyze via Claude
     const analysis = await analyzeCall({ transcript, segments, duration, prospect, company, outcome });
 
-    send('progress', { step: 4, label: 'Zusammenfassung erstellen…' });
+    send('progress', { step: 5, label: 'Zusammenfassung erstellen…' });
 
-    // 3. Persist to Supabase
+    // 4. Persist to Supabase
     const callRecord = {
       prospect: prospect || analysis.role || 'Unbekannt',
       company: company || 'Unbekannt',
@@ -74,15 +111,17 @@ router.post('/analyze', (req, res, next) => {
       transcript,
       analysis,
     };
-    // Store segments if column exists (added via migration)
     try { callRecord.segments = JSON.stringify(segments); } catch(_) {}
 
     const saved = await saveCall(callRecord);
 
+    // 5. Cleanup storage
+    supabase.storage.from('call-recordings').remove([storagePath]).catch(() => {});
+
     send('done', { call: { ...callRecord, id: saved.id } });
     res.end();
   } catch (err) {
-    console.error(err);
+    console.error('[analyze]', err);
     if (!res.headersSent) {
       res.status(500).json({ error: err.message });
     } else {
@@ -91,6 +130,7 @@ router.post('/analyze', (req, res, next) => {
     }
   } finally {
     if (tmpPath) fs.unlink(tmpPath, () => {});
+    if (audioPath) fs.unlink(audioPath, () => {});
   }
 });
 
@@ -115,7 +155,6 @@ router.post('/:id/reanalyze', async (req, res) => {
 
     send('progress', { label: 'Analyse läuft…' });
 
-    // Recover segments from stored JSON, or reconstruct from transcript text
     let storedSegments = [];
     if (call.segments) {
       try {
@@ -125,12 +164,9 @@ router.post('/:id/reanalyze', async (req, res) => {
       } catch (_) {}
     }
 
-    // Fallback: parse transcript lines back into segments
-    // Format: "[Speaker 0] (12.3s): text" or "[REP] (12s): text"
     if (!storedSegments || storedSegments.length === 0) {
       console.log('[reanalyze] no segments found, parsing from transcript text');
       const lines = (call.transcript || '').split('\n').filter(Boolean);
-      let cursor = 0;
       storedSegments = lines.map(line => {
         const m = line.match(/\[(?:Speaker\s+)?(\d+|REP|KUNDE|CLIENT)\]\s*\((\d+(?:\.\d+)?)s\):\s*(.*)/i);
         if (!m) return null;
@@ -138,7 +174,7 @@ router.post('/:id/reanalyze', async (req, res) => {
         const speaker = speakerRaw === 'REP' ? 0 : speakerRaw === 'KUNDE' || speakerRaw === 'CLIENT' ? 1 : parseInt(m[1]);
         const start = parseFloat(m[2]);
         const text = m[3];
-        const end = start + Math.max(text.split(' ').length * 0.4, 1); // estimate
+        const end = start + Math.max(text.split(' ').length * 0.4, 1);
         return { speaker, start, end, text };
       }).filter(Boolean);
       console.log(`[reanalyze] reconstructed ${storedSegments.length} segments from transcript`);
@@ -190,7 +226,6 @@ router.post('/:id/improve', async (req, res) => {
     }
 
     const client = new Anthropic({ apiKey: readKey() });
-    // Include a relevant excerpt of the transcript for context
     const transcriptSample = (call.transcript || '')
       .split('\n')
       .filter(l => l.includes('[REP]') || l.includes('[KUNDE]') || l.includes('[CLIENT]'))

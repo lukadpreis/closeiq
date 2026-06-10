@@ -1569,7 +1569,7 @@ function UploadView({ onAnalyzed }) {
   const [company, setCompany] = useState('');
   const [outcome, setOutcome] = useState('kb-scheduled');
 
-  const steps = ['Audio transkribieren…', 'Muster erkennen…', 'Einwände klassifizieren…', 'Zusammenfassung erstellen…'];
+  const steps = ['Datei hochladen…', 'Audio transkribieren…', 'Muster erkennen…', 'Einwände klassifizieren…', 'Zusammenfassung erstellen…'];
 
   const handleAnalyze = async () => {
     if (loading || !file) return;
