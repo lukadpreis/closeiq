@@ -123,9 +123,9 @@ export function analyzeCallStream({ file, prospect, company, outcome }, onProgre
   return new Promise(async (resolve, reject) => {
     try {
       // Phase 1: Upload to Supabase Storage directly (bypasses Express size limits)
-      onProgress({ step: 0, label: 'Datei wird hochgeladen… 0%' });
+      onProgress({ step: 0, label: 'Datei wird hochgeladen… 0%', pct: 0 });
       const storagePath = await uploadToStorage(file, (pct) => {
-        onProgress({ step: 0, label: `Datei wird hochgeladen… ${pct}%` });
+        onProgress({ step: 0, label: `Datei wird hochgeladen… ${pct}%`, pct });
       });
 
       // Phase 2: Tell backend to process from storage path (SSE stream)

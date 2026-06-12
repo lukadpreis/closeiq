@@ -53,6 +53,15 @@ const FONTS = `
     from { opacity: 0; }
     to   { opacity: 1; }
   }
+  @keyframes shimmer {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+  .progress-shimmer {
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.5), transparent);
+    animation: shimmer 1.2s ease-in-out infinite;
+  }
   .fade-up { animation: fadeUp 0.3s ease forwards; }
   .fade-in { animation: fadeIn 0.25s ease forwards; }
   .card-hover:hover {
@@ -1564,6 +1573,7 @@ function UploadView({ onAnalyzed }) {
   const [loading, setLoading] = useState(false);
   const [loadStep, setLoadStep] = useState(0);
   const [loadLabel, setLoadLabel] = useState('');
+  const [uploadPct, setUploadPct] = useState(0);
   const [error, setError] = useState(null);
   const [prospect, setProspect] = useState('');
   const [company, setCompany] = useState('');
@@ -1576,11 +1586,12 @@ function UploadView({ onAnalyzed }) {
     setLoading(true);
     setLoadStep(0);
     setLoadLabel(steps[0]);
+    setUploadPct(0);
     setError(null);
     try {
       const call = await analyzeCallStream(
         { file, prospect, company, outcome },
-        ({ step, label }) => { setLoadStep(step); setLoadLabel(label); },
+        ({ step, label, pct }) => { setLoadStep(step); setLoadLabel(label); if (pct !== undefined) setUploadPct(pct); },
       );
       onAnalyzed(call);
     } catch (err) {
@@ -1669,14 +1680,24 @@ function UploadView({ onAnalyzed }) {
         {loading ? loadLabel : '🚀  Call analysieren'}
       </button>
 
-      {loading && (
-        <div style={{ marginTop:16 }}>
-          <div style={{ height:3, background: C.s3, borderRadius:2, overflow:'hidden' }}>
-            <div style={{ height:'100%', borderRadius:2, background: C.accent, width:`${((loadStep+1)/steps.length)*100}%`, transition:'width 0.5s ease' }} />
+      {loading && (() => {
+        const stepFraction = loadStep === 0 ? uploadPct / 100 : 1;
+        const overallPct = ((loadStep + stepFraction) / steps.length) * 100;
+        return (
+          <div style={{ marginTop:16 }}>
+            <div style={{ height:6, background: C.s3, borderRadius:3, overflow:'hidden', position:'relative' }}>
+              <div style={{ height:'100%', borderRadius:3, background: C.accent, width:`${overallPct}%`, transition:'width 0.3s ease', position:'relative', overflow:'hidden' }}>
+                <div className="progress-shimmer" />
+              </div>
+            </div>
+            <div style={{ color: C.t3, fontSize:12, textAlign:'center', marginTop:8 }}>
+              {loadStep === 0
+                ? `Hochladen… ${uploadPct}%`
+                : `Schritt ${loadStep+1} von ${steps.length}`}
+            </div>
           </div>
-          <div style={{ color: C.t3, fontSize:12, textAlign:'center', marginTop:8 }}>Schritt {loadStep+1} von {steps.length}</div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
