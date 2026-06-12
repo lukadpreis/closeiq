@@ -46,7 +46,7 @@ export async function transcribeAudio(audioPath) {
       path: `/v1/listen?${params}`,
       method: 'POST',
       headers: {
-        Authorization: `Token ${process.env.DEEPGRAM_API_KEY}`,
+        Authorization: `Token ${process.env.DEEPGRAM_API_KEY?.trim()}`,
         'Content-Type': 'audio/mpeg',
         'Content-Length': fileSize,
       },

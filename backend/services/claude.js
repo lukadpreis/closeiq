@@ -10,9 +10,9 @@ function readKeyFromEnv(keyName) {
     const envPath = path.join(dir, '../.env');
     const content = fs.readFileSync(envPath, 'utf8');
     const match = content.match(new RegExp(`^${keyName}=(.+)$`, 'm'));
-    return match?.[1]?.trim() || process.env[keyName];
+    return match?.[1]?.trim() || process.env[keyName]?.trim();
   } catch {
-    return process.env[keyName];
+    return process.env[keyName]?.trim();
   }
 }
 
