@@ -1,3 +1,5 @@
+import { extractAudioTrack, EXTRACTION_THRESHOLD_BYTES, MAX_PROCESSABLE_BYTES } from './audioExtract.js';
+
 // In production (served from backend), API is on same origin
 // In dev (Vite proxy), also /api works
 const BASE = '/api';
@@ -122,14 +124,34 @@ function uploadToStorage(file, onUploadProgress) {
 export function analyzeCallStream({ file, prospect, company, outcome }, onProgress) {
   return new Promise(async (resolve, reject) => {
     try {
+      let uploadFile = file;
+
+      // Phase 0: Extract & compress audio in-browser for large video files.
+      // This keeps uploads well under Supabase's 50MB free-tier limit and
+      // is dramatically faster (a 1h call shrinks from ~1-8GB to ~25MB).
+      const isAlreadyAudio = /\.(mp3|m4a|wav|aac|ogg)$/i.test(file.name);
+      if (file.size > EXTRACTION_THRESHOLD_BYTES && !isAlreadyAudio) {
+        if (file.size > MAX_PROCESSABLE_BYTES) {
+          throw new Error(
+            `Datei ist mit ${(file.size/1024/1024/1024).toFixed(1)}GB zu groß für die Verarbeitung im Browser (Limit: ${(MAX_PROCESSABLE_BYTES/1024/1024/1024).toFixed(0)}GB). ` +
+            `Bitte exportiere nur die Audiospur oder komprimiere die Aufnahme vorher (z.B. mit HandBrake) und lade sie erneut hoch.`
+          );
+        }
+        onProgress({ step: 0, label: 'Audio wird extrahiert… 0%', pct: 0 });
+        uploadFile = await extractAudioTrack(file, (pct) => {
+          onProgress({ step: 0, label: `Audio wird extrahiert… ${pct}%`, pct });
+        });
+        console.log(`[api] extracted audio: ${(uploadFile.size/1024/1024).toFixed(1)}MB (from ${(file.size/1024/1024).toFixed(1)}MB)`);
+      }
+
       // Phase 1: Upload to Supabase Storage directly (bypasses Express size limits)
-      onProgress({ step: 0, label: 'Datei wird hochgeladen… 0%', pct: 0 });
-      const storagePath = await uploadToStorage(file, (pct) => {
-        onProgress({ step: 0, label: `Datei wird hochgeladen… ${pct}%`, pct });
+      onProgress({ step: 1, label: 'Datei wird hochgeladen… 0%', pct: 0 });
+      const storagePath = await uploadToStorage(uploadFile, (pct) => {
+        onProgress({ step: 1, label: `Datei wird hochgeladen… ${pct}%`, pct });
       });
 
       // Phase 2: Tell backend to process from storage path (SSE stream)
-      onProgress({ step: 1, label: 'Audio transkribieren…' });
+      onProgress({ step: 2, label: 'Datei wird vorbereitet…' });
       const res = await fetch(`${BASE}/calls/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

@@ -71,7 +71,7 @@ router.post('/analyze', express.json({ limit: '1mb' }), async (req, res) => {
 
   try {
     // 1. Download video from Supabase Storage to tmp
-    send('progress', { step: 1, label: 'Datei wird vorbereitet…' });
+    send('progress', { step: 2, label: 'Datei wird vorbereitet…' });
     console.log(`[analyze] downloading ${storagePath} from storage…`);
 
     const { data: signed, error: urlErr } = await supabase.storage
@@ -83,7 +83,7 @@ router.post('/analyze', express.json({ limit: '1mb' }), async (req, res) => {
     console.log(`[analyze] downloaded to ${tmpPath} (${(fs.statSync(tmpPath).size/1024/1024).toFixed(1)}MB)`);
 
     // 2. Extract & transcribe audio
-    send('progress', { step: 2, label: 'Audio transkribieren…' });
+    send('progress', { step: 3, label: 'Audio transkribieren…' });
     console.log('[step1] extracting audio with ffmpeg…');
     audioPath = await extractAudio(tmpPath);
     const audioSize = (fs.statSync(audioPath).size / 1024 / 1024).toFixed(1);
@@ -91,13 +91,13 @@ router.post('/analyze', express.json({ limit: '1mb' }), async (req, res) => {
     const { transcript, segments, duration, words } = await transcribeAudio(audioPath);
     console.log('[step1] transcription done, duration:', duration);
 
-    send('progress', { step: 3, label: 'Muster erkennen…' });
-    send('progress', { step: 4, label: 'Einwände klassifizieren…' });
+    send('progress', { step: 4, label: 'Muster erkennen…' });
+    send('progress', { step: 5, label: 'Einwände klassifizieren…' });
 
     // 3. Analyze via Claude
     const analysis = await analyzeCall({ transcript, segments, duration, prospect, company, outcome });
 
-    send('progress', { step: 5, label: 'Zusammenfassung erstellen…' });
+    send('progress', { step: 6, label: 'Zusammenfassung erstellen…' });
 
     // 4. Persist to Supabase
     const callRecord = {

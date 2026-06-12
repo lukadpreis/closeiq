@@ -1681,7 +1681,7 @@ function UploadView({ onAnalyzed }) {
       </button>
 
       {loading && (() => {
-        const stepFraction = loadStep === 0 ? uploadPct / 100 : 1;
+        const stepFraction = (loadStep === 0 || loadStep === 1) ? uploadPct / 100 : 1;
         const overallPct = ((loadStep + stepFraction) / steps.length) * 100;
         return (
           <div style={{ marginTop:16 }}>
@@ -1692,6 +1692,8 @@ function UploadView({ onAnalyzed }) {
             </div>
             <div style={{ color: C.t3, fontSize:12, textAlign:'center', marginTop:8 }}>
               {loadStep === 0
+                ? `Audio extrahieren… ${uploadPct}%`
+                : loadStep === 1
                 ? `Hochladen… ${uploadPct}%`
                 : `Schritt ${loadStep+1} von ${steps.length}`}
             </div>
